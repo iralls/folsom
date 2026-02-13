@@ -16,8 +16,15 @@
 package com.spotify.folsom.reconnect;
 
 import com.spotify.folsom.RawMemcacheClient;
+import com.spotify.folsom.guava.HostAndPort;
 import java.util.concurrent.CompletionStage;
 
 public interface Connector {
+
   CompletionStage<RawMemcacheClient> connect();
+
+  /**
+   * The host and port of RawMemcacheClient returned via connect(), if successful
+   */
+  HostAndPort currentAddress();
 }

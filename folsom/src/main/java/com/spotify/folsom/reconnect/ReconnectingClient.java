@@ -55,7 +55,6 @@ public class ReconnectingClient extends AbstractRawMemcacheClient {
   private final BackoffFunction backoffFunction;
   private final ScheduledExecutorService scheduledExecutorService;
   private final com.spotify.folsom.reconnect.Connector connector;
-  private final HostAndPort address;
   private final ReconnectionListener reconnectionListener;
 
   private volatile RawMemcacheClient client = NotConnectedClient.INSTANCE;
@@ -83,22 +82,30 @@ public class ReconnectingClient extends AbstractRawMemcacheClient {
     this(
         backoffFunction,
         scheduledExecutorService,
-        () ->
-            DefaultRawMemcacheClient.connect(
-                address,
-                outstandingRequestLimit,
-                eventLoopThreadFlushMaxBatchSize,
-                binary,
-                executor,
-                connectionTimeoutMillis,
-                charset,
-                metrics,
-                maxSetLength,
-                eventLoopGroup,
-                channelClass,
-                sslEngineFactory),
+        new Connector() {
+          @Override
+          public CompletionStage<RawMemcacheClient> connect() {
+            return DefaultRawMemcacheClient.connect(
+              address,
+              outstandingRequestLimit,
+              eventLoopThreadFlushMaxBatchSize,
+              binary,
+              executor,
+              connectionTimeoutMillis,
+              charset,
+              metrics,
+              maxSetLength,
+              eventLoopGroup,
+              channelClass,
+              sslEngineFactory);
+          }
+
+          @Override
+          public HostAndPort currentAddress() {
+            return address;
+          }
+        },
         authenticator,
-        address,
         reconnectionListener);
   }
 
@@ -121,8 +128,10 @@ public class ReconnectingClient extends AbstractRawMemcacheClient {
     this(
         backoffFunction,
         scheduledExecutorService,
-        () ->
-            DefaultRawMemcacheClient.connect(
+        new Connector() {
+          @Override
+          public CompletionStage<RawMemcacheClient> connect() {
+            return DefaultRawMemcacheClient.connect(
                 address,
                 outstandingRequestLimit,
                 eventLoopThreadFlushMaxBatchSize,
@@ -134,24 +143,38 @@ public class ReconnectingClient extends AbstractRawMemcacheClient {
                 maxSetLength,
                 eventLoopGroup,
                 channelClass,
-                sslEngineFactory),
+                sslEngineFactory);
+          }
+
+          @Override
+          public HostAndPort currentAddress() {
+            return address;
+          }
+        },
         authenticator,
-        address,
         new StandardReconnectionListener());
   }
 
-  private ReconnectingClient(
+  public ReconnectingClient(
       final BackoffFunction backoffFunction,
       final ScheduledExecutorService scheduledExecutorService,
       final Connector connector,
       final Authenticator authenticator,
-      final HostAndPort address,
       final ReconnectionListener reconnectionListener) {
     this(
         backoffFunction,
         scheduledExecutorService,
-        () -> AuthenticatingClient.authenticate(connector, authenticator),
-        address,
+        new Connector() {
+          @Override
+          public CompletionStage<RawMemcacheClient> connect() {
+            return AuthenticatingClient.authenticate(connector, authenticator);
+          }
+
+          @Override
+          public HostAndPort currentAddress() {
+            return connector.currentAddress();
+          }
+        },
         reconnectionListener);
   }
 
@@ -159,7 +182,6 @@ public class ReconnectingClient extends AbstractRawMemcacheClient {
       final BackoffFunction backoffFunction,
       final ScheduledExecutorService scheduledExecutorService,
       final com.spotify.folsom.reconnect.Connector connector,
-      final HostAndPort address,
       final ReconnectionListener reconnectionListener) {
     super();
     this.backoffFunction = backoffFunction;
@@ -167,7 +189,6 @@ public class ReconnectingClient extends AbstractRawMemcacheClient {
     this.connector = connector;
     this.reconnectionListener = reconnectionListener;
 
-    this.address = address;
     retry();
   }
 
@@ -229,7 +250,7 @@ public class ReconnectingClient extends AbstractRawMemcacheClient {
               }
               ReconnectingClient.this.onFailure(t);
             } else {
-              reconnectionListener.reconnectionSuccessful(address, reconnectCount, stayConnected);
+              reconnectionListener.reconnectionSuccessful(connector.currentAddress(), reconnectCount, stayConnected);
               reconnectCount = 0;
               client.shutdown();
               client = newClient;
@@ -247,7 +268,7 @@ public class ReconnectingClient extends AbstractRawMemcacheClient {
                   .disconnectFuture()
                   .whenComplete(
                       (unused, throwable) ->
-                          reconnectionListener.connectionLost(throwable, address))
+                          reconnectionListener.connectionLost(throwable, connector.currentAddress()))
                   .thenRun(
                       () -> {
                         notifyConnectionChange();
@@ -271,7 +292,7 @@ public class ReconnectingClient extends AbstractRawMemcacheClient {
     final long backOff = backoffFunction.getBackoffTimeMillis(reconnectCount);
 
     reconnectCount++;
-    this.reconnectionListener.reconnectionQueuedFromError(cause, address, backOff, reconnectCount);
+    this.reconnectionListener.reconnectionQueuedFromError(cause, connector.currentAddress(), backOff, reconnectCount);
 
     scheduledExecutorService.schedule(
         () -> {

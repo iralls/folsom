@@ -80,16 +80,31 @@ public class ReconnectingClientTest {
         .thenReturn(CompletableFutures.exceptionallyCompletedFuture(new RuntimeException()))
         .thenReturn(CompletableFutures.exceptionallyCompletedFuture(new RuntimeException()))
         .thenReturn(CompletableFuture.completedFuture(delegate));
+    when(connector.currentAddress())
+        .thenReturn(HostAndPort.fromString("localhost:123"));
+
+    ReconnectionListener listener = mock(ReconnectionListener.class);
 
     ReconnectingClient client =
         new ReconnectingClient(
             backoffFunction,
             scheduledExecutorService,
             connector,
-            HostAndPort.fromString("localhost:123"),
-            new ReconnectingClient.StandardReconnectionListener());
+            listener);
 
     verify(connector, times(3)).connect();
+    verify(listener, times(2))
+        .connectionFailure(Mockito.any());
+
+    HostAndPort expectedHostAndPort = connector.currentAddress();
+
+    verify(listener, times(1))
+        .reconnectionQueuedFromError(Mockito.any(Throwable.class), eq(expectedHostAndPort), anyLong(), eq(1));
+    verify(listener, times(1))
+        .reconnectionQueuedFromError(Mockito.any(Throwable.class), eq(expectedHostAndPort),
+            anyLong(), eq(2));
+    verify(listener, times(1))
+        .reconnectionSuccessful(eq(expectedHostAndPort), eq(2), eq(true));
     verify(scheduledExecutorService, times(1))
         .schedule(Mockito.<Runnable>any(), eq(0L), eq(TimeUnit.MILLISECONDS));
     verify(scheduledExecutorService, times(1))
@@ -97,7 +112,7 @@ public class ReconnectingClientTest {
     verify(backoffFunction, times(1)).getBackoffTimeMillis(0);
     verify(backoffFunction, times(1)).getBackoffTimeMillis(1);
 
-    verifyNoMoreInteractions(connector, scheduledExecutorService, backoffFunction);
+    verifyNoMoreInteractions(scheduledExecutorService, backoffFunction);
 
     assertTrue(client.isConnected());
   }
@@ -117,16 +132,22 @@ public class ReconnectingClientTest {
         .thenReturn(CompletableFutures.exceptionallyCompletedFuture(new RuntimeException()))
         .thenReturn(CompletableFutures.exceptionallyCompletedFuture(new RuntimeException()))
         .thenReturn(CompletableFuture.completedFuture(delegate2));
+    when(connector.currentAddress())
+        .thenReturn(HostAndPort.fromString("localhost:123"));
+    HostAndPort expectedHostAndPort = connector.currentAddress();
+
+    ReconnectionListener listener = mock(ReconnectionListener.class);
 
     ReconnectingClient client =
         new ReconnectingClient(
             backoffFunction,
             scheduledExecutorService,
             connector,
-            HostAndPort.fromString("localhost:123"),
-            new ReconnectingClient.StandardReconnectionListener());
+            listener);
 
     verify(connector, times(4)).connect();
+    verify(listener, times(1)).reconnectionSuccessful(eq(expectedHostAndPort), eq(0), eq(true));
+    verify(listener, times(1)).reconnectionSuccessful(eq(expectedHostAndPort), eq(2), eq(true));
     verify(scheduledExecutorService, times(1))
         .schedule(Mockito.<Runnable>any(), eq(0L), eq(TimeUnit.MILLISECONDS));
     verify(scheduledExecutorService, times(1))
@@ -134,7 +155,7 @@ public class ReconnectingClientTest {
     verify(backoffFunction, times(1)).getBackoffTimeMillis(0);
     verify(backoffFunction, times(1)).getBackoffTimeMillis(1);
 
-    verifyNoMoreInteractions(connector, scheduledExecutorService, backoffFunction);
+    verifyNoMoreInteractions(scheduledExecutorService, backoffFunction);
 
     assertTrue(client.isConnected());
   }
@@ -155,7 +176,6 @@ public class ReconnectingClientTest {
             backoffFunction,
             scheduledExecutorService,
             connector,
-            HostAndPort.fromString("localhost:123"),
             new ReconnectingClient.StandardReconnectionListener());
 
     assertTrue(client.isConnected());
