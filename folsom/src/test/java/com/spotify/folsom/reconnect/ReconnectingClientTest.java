@@ -43,6 +43,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import org.apache.commons.lang3.tuple.Pair;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.ArgumentMatchers;
@@ -70,6 +71,7 @@ public class ReconnectingClientTest {
   @Test
   public void testInitialConnect() throws Exception {
     FakeClient delegate = new FakeClient(true, false);
+    HostAndPort hostAndPort = HostAndPort.fromString("localhost:123");
 
     BackoffFunction backoffFunction = mock(BackoffFunction.class);
     when(backoffFunction.getBackoffTimeMillis(0)).thenReturn(0L);
@@ -79,9 +81,7 @@ public class ReconnectingClientTest {
     when(connector.connect())
         .thenReturn(CompletableFutures.exceptionallyCompletedFuture(new RuntimeException()))
         .thenReturn(CompletableFutures.exceptionallyCompletedFuture(new RuntimeException()))
-        .thenReturn(CompletableFuture.completedFuture(delegate));
-    when(connector.currentAddress())
-        .thenReturn(HostAndPort.fromString("localhost:123"));
+        .thenReturn(CompletableFuture.completedFuture(Pair.of(delegate, hostAndPort)));
 
     ReconnectionListener listener = mock(ReconnectionListener.class);
 
@@ -96,15 +96,13 @@ public class ReconnectingClientTest {
     verify(listener, times(2))
         .connectionFailure(Mockito.any());
 
-    HostAndPort expectedHostAndPort = connector.currentAddress();
-
     verify(listener, times(1))
-        .reconnectionQueuedFromError(Mockito.any(Throwable.class), eq(expectedHostAndPort), anyLong(), eq(1));
+        .reconnectionQueuedFromError(Mockito.any(Throwable.class), eq(hostAndPort), anyLong(), eq(1));
     verify(listener, times(1))
-        .reconnectionQueuedFromError(Mockito.any(Throwable.class), eq(expectedHostAndPort),
+        .reconnectionQueuedFromError(Mockito.any(Throwable.class), eq(hostAndPort),
             anyLong(), eq(2));
     verify(listener, times(1))
-        .reconnectionSuccessful(eq(expectedHostAndPort), eq(2), eq(true));
+        .reconnectionSuccessful(eq(hostAndPort), eq(2), eq(true));
     verify(scheduledExecutorService, times(1))
         .schedule(Mockito.<Runnable>any(), eq(0L), eq(TimeUnit.MILLISECONDS));
     verify(scheduledExecutorService, times(1))
@@ -121,6 +119,7 @@ public class ReconnectingClientTest {
   public void testLostConnectionRetry() throws Exception {
     FakeClient delegate1 = new FakeClient(true, true);
     FakeClient delegate2 = new FakeClient(true, false);
+    HostAndPort hostAndPort = HostAndPort.fromString("localhost:123");
 
     BackoffFunction backoffFunction = mock(BackoffFunction.class);
     when(backoffFunction.getBackoffTimeMillis(0)).thenReturn(0L);
@@ -128,13 +127,10 @@ public class ReconnectingClientTest {
 
     Connector connector = mock(Connector.class);
     when(connector.connect())
-        .thenReturn(CompletableFuture.completedFuture(delegate1))
+        .thenReturn(CompletableFuture.completedFuture(Pair.of(delegate1, hostAndPort)))
         .thenReturn(CompletableFutures.exceptionallyCompletedFuture(new RuntimeException()))
         .thenReturn(CompletableFutures.exceptionallyCompletedFuture(new RuntimeException()))
-        .thenReturn(CompletableFuture.completedFuture(delegate2));
-    when(connector.currentAddress())
-        .thenReturn(HostAndPort.fromString("localhost:123"));
-    HostAndPort expectedHostAndPort = connector.currentAddress();
+        .thenReturn(CompletableFuture.completedFuture(Pair.of(delegate2, hostAndPort)));
 
     ReconnectionListener listener = mock(ReconnectionListener.class);
 
@@ -146,8 +142,8 @@ public class ReconnectingClientTest {
             listener);
 
     verify(connector, times(4)).connect();
-    verify(listener, times(1)).reconnectionSuccessful(eq(expectedHostAndPort), eq(0), eq(true));
-    verify(listener, times(1)).reconnectionSuccessful(eq(expectedHostAndPort), eq(2), eq(true));
+    verify(listener, times(1)).reconnectionSuccessful(eq(hostAndPort), eq(0), eq(true));
+    verify(listener, times(1)).reconnectionSuccessful(eq(hostAndPort), eq(2), eq(true));
     verify(scheduledExecutorService, times(1))
         .schedule(Mockito.<Runnable>any(), eq(0L), eq(TimeUnit.MILLISECONDS));
     verify(scheduledExecutorService, times(1))
@@ -163,13 +159,14 @@ public class ReconnectingClientTest {
   @Test
   public void testShutdown() throws Exception {
     FakeClient delegate = new FakeClient(true, false);
+    HostAndPort hostAndPort = HostAndPort.fromString("localhost:123");
 
     BackoffFunction backoffFunction = mock(BackoffFunction.class);
     when(backoffFunction.getBackoffTimeMillis(0)).thenReturn(0L);
     when(backoffFunction.getBackoffTimeMillis(1)).thenReturn(123L);
 
     Connector connector = mock(Connector.class);
-    when(connector.connect()).thenReturn(CompletableFuture.completedFuture(delegate));
+    when(connector.connect()).thenReturn(CompletableFuture.completedFuture(Pair.of(delegate, hostAndPort)));
 
     ReconnectingClient client =
         new ReconnectingClient(

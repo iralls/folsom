@@ -17,15 +17,24 @@
 package com.spotify.folsom.authenticate;
 
 import com.spotify.folsom.RawMemcacheClient;
+import com.spotify.folsom.guava.HostAndPort;
 import com.spotify.folsom.reconnect.Connector;
 import java.util.concurrent.CompletionStage;
+import org.apache.commons.lang3.tuple.Pair;
 
 public class AuthenticatingClient {
 
-  public static CompletionStage<RawMemcacheClient> authenticate(
+  public static CompletionStage<Pair<RawMemcacheClient, HostAndPort>> authenticate(
       Connector connector, final Authenticator authenticator) {
 
-    CompletionStage<RawMemcacheClient> client = connector.connect();
-    return client.thenCompose(authenticator::authenticate);
+    return connector.connect()
+        .thenCompose(p -> {
+
+          RawMemcacheClient client = p.getLeft();
+          HostAndPort host = p.getRight();
+
+          return authenticator.authenticate(client)
+              .thenApply(authenticatedClient -> Pair.of(authenticatedClient, host));
+        });
   }
 }
